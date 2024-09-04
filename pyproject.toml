@@ -1,12 +1,11 @@
 [tool.poetry]
 name = "tachidesk-notifier"
 version = "0.1.0"
-description = "A script to track Tachidesk manga updates and send notifications"
+description = "A notification system for Tachidesk manga updates"
 authors = ["timesfai <timesfai@fastmail.com>"]
-packages = [{include = "tachidesk_notifier"}]
 
 [tool.poetry.dependencies]
-python = "^3.9"
+python = "^3.11"
 requests = "^2.26.0"
 pyTelegramBotAPI = "^4.2.0"
 python-dotenv = "^0.19.0"
@@ -15,8 +14,5 @@ python-dotenv = "^0.19.0"
 pytest = "^7.3.1"
 
 [build-system]
-requires = ["poetry-core"]
+requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]

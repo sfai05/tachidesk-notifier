@@ -7,6 +7,12 @@ import telebot
 from dotenv import load_dotenv
 from urllib.parse import urljoin
 import hashlib
+import logging
+import logging.config
+
+# Load logging configuration
+logging.config.fileConfig('logging_config.ini')
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -15,7 +21,7 @@ load_dotenv()
 required_vars = ['TACHIDESK_BASE_URL', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID']
 missing_vars = [var for var in required_vars if not os.getenv(var)]
 if missing_vars:
-    print(f"Error: The following required environment variables are not set: {', '.join(missing_vars)}")
+    logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
     sys.exit(1)
 
 # Tachidesk base URL and GraphQL endpoint
@@ -59,32 +65,43 @@ query {
 """
 
 def fetch_manga_data():
-    response = requests.post(graphql_endpoint, json={'query': query})
-    if response.status_code == 200:
+    logger.info("Fetching manga data from Tachidesk API")
+    try:
+        response = requests.post(graphql_endpoint, json={'query': query})
+        response.raise_for_status()
+        logger.info("Successfully fetched manga data")
         return response.json()
-    else:
-        raise Exception(f"Query failed with status code: {response.status_code}")
+    except requests.RequestException as e:
+        logger.error(f"Failed to fetch manga data: {str(e)}")
+        raise
 
 def load_stored_data():
+    logger.info(f"Loading stored data from {JSON_FILE}")
     if os.path.exists(JSON_FILE):
         with open(JSON_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            data = json.load(f)
+        logger.info(f"Loaded data for {len(data)} manga")
+        return data
+    logger.info("No stored data found")
     return {}
 
 def save_manga_data(data):
+    logger.info(f"Saving manga data to {JSON_FILE}")
     with open(JSON_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+    logger.info(f"Saved data for {len(data)} manga")
 
 def get_thumbnail_path(manga_id, thumbnail_url):
     filename = f"{manga_id}_{hashlib.md5(thumbnail_url.encode()).hexdigest()}.jpg"
     return os.path.join(THUMBNAIL_DIR, filename)
 
 def download_thumbnail(thumbnail_url, manga_id):
+    logger.info(f"Downloading thumbnail for manga {manga_id}")
     full_thumbnail_url = urljoin(base_url, thumbnail_url)
     local_path = get_thumbnail_path(manga_id, thumbnail_url)
     
     if os.path.exists(local_path):
-        print(f"Thumbnail already exists for manga {manga_id}")
+        logger.info(f"Thumbnail already exists for manga {manga_id}")
         return local_path
     
     try:
@@ -92,13 +109,14 @@ def download_thumbnail(thumbnail_url, manga_id):
         response.raise_for_status()
         with open(local_path, 'wb') as f:
             f.write(response.content)
-        print(f"Successfully downloaded thumbnail for manga {manga_id}")
+        logger.info(f"Successfully downloaded thumbnail for manga {manga_id}")
         return local_path
     except Exception as e:
-        print(f"Error downloading thumbnail for manga {manga_id}: {str(e)}")
+        logger.error(f"Error downloading thumbnail for manga {manga_id}: {str(e)}")
         return None
 
 def send_telegram_notification(title, chapter_name, upload_date, thumbnail_path):
+    logger.info(f"Sending Telegram notification for {title}")
     message = f"New unread chapter for {title}:\n" \
               f"Chapter: {chapter_name}\n" \
               f"Upload Date: {upload_date}"
@@ -107,17 +125,15 @@ def send_telegram_notification(title, chapter_name, upload_date, thumbnail_path)
         if thumbnail_path and os.path.exists(thumbnail_path):
             with open(thumbnail_path, 'rb') as photo:
                 bot.send_photo(TELEGRAM_CHAT_ID, photo, caption=message)
-            print(f"Successfully sent notification with thumbnail for {title}")
+            logger.info(f"Successfully sent notification with thumbnail for {title}")
         else:
-            fallback_message = f"{message}\n(Thumbnail couldn't be loaded)"
-            bot.send_message(TELEGRAM_CHAT_ID, fallback_message)
-            print(f"Sent notification without thumbnail for {title}")
+            bot.send_message(TELEGRAM_CHAT_ID, message)
+            logger.info(f"Sent notification without thumbnail for {title}")
     except Exception as e:
-        print(f"Error sending Telegram notification: {str(e)}")
-        fallback_message = f"{message}\n(Error sending notification)"
-        bot.send_message(TELEGRAM_CHAT_ID, fallback_message)
+        logger.error(f"Error sending Telegram notification for {title}: {str(e)}")
 
 def process_manga_data(data):
+    logger.info("Processing manga data")
     mangas = data['data']['categories']['nodes'][0]['mangas']['nodes']
     stored_data = load_stored_data()
     updated_data = {}
@@ -128,6 +144,8 @@ def process_manga_data(data):
         title = manga['title']
         thumbnail_url = manga.get('thumbnailUrl', '')
         
+        logger.info(f"Processing manga: {title} (ID: {manga_id})")
+        
         if manga['firstUnreadChapter']:
             chapter = manga['firstUnreadChapter']
             new_chapter_id = str(chapter['id'])
@@ -137,7 +155,7 @@ def process_manga_data(data):
             stored_chapter = stored_data.get(manga_id, {})
             
             if not stored_chapter:
-                # New manga entry
+                logger.info(f"New manga entry: {title}")
                 updated_data[manga_id] = {
                     'title': title,
                     'chapter_id': new_chapter_id,
@@ -146,16 +164,15 @@ def process_manga_data(data):
                     'thumbnail_url': thumbnail_url
                 }
                 
-                # Only send notification if the upload date is within the last day
-                if current_time - new_upload_date <= timedelta(days=1):
+                if current_time - new_upload_date <= timedelta(hours=48):
                     thumbnail_path = download_thumbnail(thumbnail_url, manga_id)
                     send_telegram_notification(title, new_chapter_name, new_upload_date.isoformat(), thumbnail_path)
-                    print(f"New manga added and notified: {title}")
+                    logger.info(f"New manga added and notified: {title}")
                 else:
-                    print(f"New manga added without notification (older than 1 day): {title}")
+                    logger.info(f"New manga added without notification (older than 48 hours): {title}")
             
             elif stored_chapter.get('chapter_id') != new_chapter_id:
-                # Existing manga with new chapter
+                logger.info(f"New chapter detected for {title}")
                 updated_data[manga_id] = {
                     'title': title,
                     'chapter_id': new_chapter_id,
@@ -166,24 +183,25 @@ def process_manga_data(data):
                 
                 thumbnail_path = download_thumbnail(thumbnail_url, manga_id)
                 send_telegram_notification(title, new_chapter_name, new_upload_date.isoformat(), thumbnail_path)
-                print(f"Updated: {title}")
-                print(f"New Chapter: {new_chapter_name}")
-                print(f"Upload Date: {new_upload_date.isoformat()}")
+                logger.info(f"Updated: {title}, New Chapter: {new_chapter_name}, Upload Date: {new_upload_date.isoformat()}")
             else:
                 updated_data[manga_id] = stored_chapter
-                print(f"No new chapter for: {title}")
+                logger.info(f"No new chapter for: {title}")
         else:
             updated_data[manga_id] = stored_data.get(manga_id, {})
-            print(f"No unread chapters for: {title}")
+            logger.info(f"No unread chapters for: {title}")
     
     save_manga_data(updated_data)
+    logger.info("Finished processing manga data")
 
 def main():
+    logger.info("Starting Tachidesk Notifier")
     try:
         data = fetch_manga_data()
         process_manga_data(data)
     except Exception as e:
-        print(f"An error occurred: {str(e)}")
+        logger.error(f"An error occurred in the main process: {str(e)}")
+    logger.info("Tachidesk Notifier finished")
 
 if __name__ == "__main__":
     main()
