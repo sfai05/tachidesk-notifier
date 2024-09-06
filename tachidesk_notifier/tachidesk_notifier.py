@@ -10,12 +10,20 @@ import hashlib
 import logging
 import logging.config
 
-# Load logging configuration
-logging.config.fileConfig('logging_config.ini')
-logger = logging.getLogger(__name__)
-
 # Load environment variables
 load_dotenv()
+APP_DIR = os.getenv('APP_DIR', os.getcwd())
+
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler(os.path.join(APP_DIR, 'logs/tachidesk_notifier.log'))
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # Check for required environment variables
 required_vars = ['TACHIDESK_BASE_URL', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID']
@@ -36,10 +44,10 @@ TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
 # JSON file for storing manga data
-JSON_FILE = os.getenv('JSON_FILE_PATH', os.path.join(os.getcwd(), 'manga_data.json'))
+JSON_FILE = os.getenv('JSON_FILE_PATH', os.path.join(APP_DIR, 'data/manga_data.json'))
 
 # Directory for storing thumbnails
-THUMBNAIL_DIR = os.getenv('THUMBNAIL_DIR', os.path.join(os.getcwd(), 'thumbnails'))
+THUMBNAIL_DIR = os.getenv('THUMBNAIL_DIR', os.path.join(APP_DIR, 'data/thumbnails'))
 os.makedirs(THUMBNAIL_DIR, exist_ok=True)
 
 # GraphQL query

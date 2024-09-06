@@ -24,20 +24,18 @@ RUN poetry config virtualenvs.create false \
 # Copy the rest of the application's code
 COPY . /app
 
-# Copy the logging configuration file
-COPY logging_config.ini /app/logging_config.ini
+# Create directories for JSON data, thumbnails, and logs
+RUN mkdir -p /app/data /app/thumbnails /app/logs
 
-# Create directories for JSON data and thumbnails
-RUN mkdir -p /app/data /app/thumbnails
+# Set the APP_DIR environment variable
+ENV APP_DIR=/app
 
 # Create the log file to be able to run tail
 RUN touch /var/log/cron.log
 
-# Get the path to the Python executable
-RUN PYTHON_PATH=$(which python)
-
 # Create a script to setup and run cron with the SCHEDULE environment variable
 RUN echo '#!/bin/sh\n\
+printenv > /etc/environment\n\
 PYTHON_PATH=$(which python)\n\
 echo "Running initial check..."\n\
 $PYTHON_PATH /app/tachidesk_notifier/tachidesk_notifier.py >> /var/log/cron.log 2>&1\n\
